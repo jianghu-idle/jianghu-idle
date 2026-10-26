@@ -109,6 +109,8 @@ const TIERS = [
   { name: '飞升', color: '#ff6f6f' },
 ];
 
+const FINAL_MAP = 9;
+
 const TIER_ENEMIES = [
   null,
   { mobs: ['青狼', '铁背熊', '山魈', '雷纹虎'], elite: '裂地犀', boss: '苍狼王' },
@@ -2963,7 +2965,8 @@ function spawnMonster() {
     }
   }
   const mapIndex = S.mapIndex;
-  const wantBoss = S.kills > 0 && S.kills % 10 === 0 && !S.cleared[mapIndex];
+  const wantBoss = S.kills > 0 && S.kills % 10 === 0 &&
+    (!S.cleared[mapIndex] || (mapIndex === FINAL_MAP && !S.ending));
   if (!wantBoss && S.kills > 5 && Math.random() < 0.025) {
     monster = challengerMonster();
     monster.spd = Math.round(totalStats().agi * 1.05);
@@ -3437,11 +3440,11 @@ function onMonsterKilled() {
     S.tokens = Math.min(5, (S.tokens || 0) + 1);
     const map = MAPS[S.mapIndex];
     addLog(map.outro, 'story');
-    if (S.mapIndex < MAPS.length - 1) {
+    if (S.mapIndex < FINAL_MAP) {
       addLog('前路已开：' + MAPS[S.mapIndex + 1].name + '。', 'gold');
     }
     maybeUnlockPassive();
-    if (S.mapIndex === MAPS.length - 1 && S.level >= MAX_LEVEL) {
+    if (S.mapIndex === FINAL_MAP && S.level >= MAX_LEVEL) {
       showEndingChoice();
     }
   }
@@ -3738,8 +3741,7 @@ function levelUpIfNeeded() {
 
 function checkFinal() {
   if (S.level >= MAX_LEVEL && !S.ending) {
-    const map = MAPS[MAPS.length - 1];
-    if (S.cleared[MAPS.length - 1] && !S.ending) {
+    if (S.cleared[FINAL_MAP]) {
       /* 最终 BOSS 击破时已弹结局 */
     }
   }
