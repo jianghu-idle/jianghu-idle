@@ -3279,7 +3279,7 @@ function foeAttack(foe, unit) {
 }
 
 function tick() {
-  if (S.ending || S.paused || !S.created || S.eventOpen) return;
+  if (S.paused || !S.created || S.eventOpen) return;
   const st = totalStats();
   battle.mp = Math.min(st.mp, battle.mp + st.mpRegen);
   if (battle.potCd > 0) battle.potCd -= 1;
@@ -3444,7 +3444,7 @@ function onMonsterKilled() {
       addLog('前路已开：' + MAPS[S.mapIndex + 1].name + '。', 'gold');
     }
     maybeUnlockPassive();
-    if (S.mapIndex === FINAL_MAP && S.level >= MAX_LEVEL) {
+    if (S.mapIndex === FINAL_MAP && S.level >= MAX_LEVEL && !S.ending) {
       showEndingChoice();
     }
   }
@@ -4705,7 +4705,7 @@ function renderBars() {
 function renderStatus() {
   const el = document.getElementById('battle-status');
   if (!el) return;
-  if (S.ending) { el.textContent = '江湖已定'; return; }
+  if (S.ending && !monster) { el.textContent = '江湖已定'; return; }
   if (S.eventOpen) { el.textContent = '奇遇…'; return; }
   if (S.paused) { el.textContent = '已收剑（暂停）'; return; }
   if (!monster) { el.textContent = '行走江湖中…'; el.style.color = ''; return; }
