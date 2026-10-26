@@ -1,4 +1,4 @@
-const CACHE = 'wuxia-v65';
+const CACHE = 'wuxia-v66';
 const ASSETS = [
   './', './index.html', './game.js', './content.js', './manifest.json',
   './icon-192.png', './icon-512.png',
