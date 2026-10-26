@@ -2023,6 +2023,7 @@ const DEFAULT_STATE = () => ({
   afterTale: {},
   tier: 0,
   hall: null,
+  hallUnlocked: false,
   essence: 0,
   mats: {},
   artifacts: {},
@@ -2142,6 +2143,7 @@ function load() {
         s.tier = s.tier || 0;
         s.essence = s.essence || 0;
         s.hall = s.hall || null;
+        s.hallUnlocked = !!(s.hallUnlocked || (s.hall && s.hall.level));
         s.talentLv = s.talentLv || {};
         s.mats = s.mats || {};
         s.artifacts = s.artifacts || {};
@@ -2922,7 +2924,8 @@ function spawnMonster() {
   battle.ally = {};
   if (S.tower && S.tower.active) {
     const base = towerMonster(S.tower.floor);
-    foes = makeFoes(base, base.isBoss ? 1 : multiCount(false));
+    const n = S.tower.floor < 5 ? 1 : multiCount(false);
+    foes = makeFoes(base, base.isBoss ? 1 : n);
     monster = foes[0];
     monster.spd = Math.round(totalStats().agi * 0.9);
     addLog('第 ' + S.tower.floor + ' 层：' + monster.name +
@@ -3594,10 +3597,10 @@ function towerMonster(floor) {
   const m = monsterFor(S.mapIndex, S.level, isBoss);
   m.name = isBoss ? '塔主' : '守塔人';
   const mul = 1 + 0.18 * (floor - 1);
-  m.hp = Math.round((70 + pw * 0.85) * mul * (isBoss ? 1.5 : 1));
+  m.hp = Math.round((40 + pw * 0.6) * mul * (isBoss ? 1.4 : 1));
   m.maxHp = m.hp;
-  m.atk = Math.round((10 + pw * 0.06) * (1 + 0.1 * (floor - 1)));
-  m.def = Math.round(6 + pw * 0.05);
+  m.atk = Math.round((5 + pw * 0.04) * (1 + 0.1 * (floor - 1)));
+  m.def = Math.round(4 + pw * 0.04);
   m.exp = Math.round((m.exp + pw * 0.5) * (1 + floor * 0.2));
   m.silver = Math.round((m.silver + pw * 0.25) * (1 + floor * 0.15));
   m.isBoss = isBoss;
@@ -4000,6 +4003,11 @@ function ensureWeek() {
 }
 
 function weeklyBoss() {
+  html += OVERWORLDS.map((w) =>
+    '<div class="item"><div class="row"><span>' + w.name + ' <span class="tag">' + w.mobs.join(' / ') + ' / ' + w.boss + '</span></span>' +
+    '<span><button data-other="' + w.id + '"' + ((S.tokens || 0) >= 2 && !S.dungeon.active ? '' : ' disabled') + '>进入（2 挑战令）</button></span></div>' +
+    '<div class="aff">' + w.desc + ' 通关掉落奇物，收进行囊。</div></div>'
+  ).join('');
   const wk = ensureWeek();
   const idx = Math.abs(parseInt(wk.key.split('-W')[1] || '1', 10)) % WEEKLY_BOSSES.length;
   const b = WEEKLY_BOSSES[idx];
@@ -5160,11 +5168,6 @@ function panelDungeon() {
   }
   html += '<h4>掉落</h4><div class="muted">套装部件 55% · 奇物 5% · 秘籍残页 50% · 神兵 3%，通关返还 1 枚挑战令。</div>';
   html += '<h4 style="margin-top:14px">异空间</h4>';
-  html += OVERWORLDS.map((w) =>
-    '<div class="item"><div class="row"><span>' + w.name + ' <span class="tag">' + w.mobs.join(' / ') + ' / ' + w.boss + '</span></span>' +
-    '<span><button data-other="' + w.id + '"' + ((S.tokens || 0) >= 2 && !S.dungeon.active ? '' : ' disabled') + '>进入（2 挑战令）</button></span></div>' +
-    '<div class="aff">' + w.desc + ' 通关掉落奇物，收进行囊。</div></div>'
-  ).join('');
   const wk = ensureWeek();
   const wbIdx = Math.abs(parseInt(wk.key.split('-W')[1] || '1', 10)) % WEEKLY_BOSSES.length;
   const wb = WEEKLY_BOSSES[wbIdx];
@@ -5732,6 +5735,9 @@ function hallAccrue(claim) {
 function hallAssign(slot, id) {
   const h = hallState();
   if (id && !npcState(id).bond) return;
+  for (const k of Object.keys(h.slots)) {
+    if (h.slots[k] === id) h.slots[k] = null;
+  }
   h.slots[slot] = id || null;
   addLog(id ? '「' + npcName(id) + '」接手了' + HALL_SLOTS.find((s) => s.id === slot).name + '。' : '你撤下了' + HALL_SLOTS.find((s) => s.id === slot).name + '的人。', 'sys');
   save();
@@ -5843,7 +5849,7 @@ function hallAlchemy() {
 }
 
 function panelHall() {
-  if (S.ending !== 'retire') {
+  if (S.ending !== 'retire' && !S.hallUnlocked) {
     return '<h4>武馆</h4><div class="muted">归隐结局后，可在青石村开一间武馆，让故人替你打理。</div>';
   }
   const h = hallState();
@@ -5954,8 +5960,15 @@ function panelSet() {
     'style="flex:1 1 200px;padding:8px;background:#0a0f0a;border:1px solid #2c3f2c;color:#cfe0cf;border-radius:4px;font:inherit" />' +
     '<button data-redeem="1">兑换</button></div>' +
     '<h4>关于</h4>' +
-    '<div class="muted">江湖·挂机录 v1.3<br/>十图十级 · 秘境异界 · 门派 · 转生天赋 · 队友内院 · 宠物 · 称号 · 图鉴 · 悬赏<br/>图片导入：在「故人」面板里给角色换图，存在本机。</div>' +
+    '<div class="muted">江湖·挂机录 v1.4<br/>十图十级 · 秘境异界 · 门派 · 转生天赋 · 队友内院 · 宠物 · 称号 · 图鉴 · 悬赏<br/>图片导入：在「故人」面板里给角色换图，存在本机。</div>' +
     '<h4>更新日志</h4>' +
+    '<div class="item"><div class="row"><span class="q-green">v1.4</span></div>' +
+    '<div class="aff">· 归隐结局解锁武馆：教习/药园/账房/管事四岗位，故人驻守产出银两、药材、声望（离线最多 12 小时）<br/>' +
+    '· 武馆收徒、培养学生、出师、踢馆事件与炼丹<br/>' +
+    '· 装备分解：分解得灵石，攒满 3000 必出红色装备<br/>' +
+    '· 属性上限：爆伤 350%、吸血 15%、减伤 60% 等，天劫改为按真实输出定价<br/>' +
+    '· 天赋「羁绊」与天赋升级（消耗轮回点，每级 +50%）<br/>' +
+    '· 修复爬塔低层过难、故人可同时驻守多个岗位的问题</div></div>' +
     '<div class="item"><div class="row"><span class="q-green">v1.3</span></div>' +
     '<div class="aff">· 新增道途品阶（白→绿→蓝→青→紫→橙→红），名字变色，每阶攻防气血 +8%<br/>' +
     '· 新增天劫：满 100 级后可渡劫，失败连掉 3 级<br/>' +
@@ -6484,6 +6497,7 @@ function showEndingChoice() {
 
 function finishGame(kind) {
   S.ending = kind;
+  if (kind === 'retire') S.hallUnlocked = true;
   const h = S.honor || 0;
   const good = h >= 40;
   const evil = h <= -40;
