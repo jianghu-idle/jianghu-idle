@@ -5168,6 +5168,11 @@ function panelDungeon() {
   }
   html += '<h4>掉落</h4><div class="muted">套装部件 55% · 奇物 5% · 秘籍残页 50% · 神兵 3%，通关返还 1 枚挑战令。</div>';
   html += '<h4 style="margin-top:14px">异空间</h4>';
+  html += OVERWORLDS.map((w) =>
+    '<div class="item"><div class="row"><span>' + w.name + ' <span class="tag">' + w.mobs.join(' / ') + ' / ' + w.boss + '</span></span>' +
+    '<span><button data-other="' + w.id + '"' + ((S.tokens || 0) >= 2 && !S.dungeon.active ? '' : ' disabled') + '>进入（2 挑战令）</button></span></div>' +
+    '<div class="aff">' + w.desc + ' 通关掉落奇物，收进行囊。</div></div>'
+  ).join('');
   const wk = ensureWeek();
   const wbIdx = Math.abs(parseInt(wk.key.split('-W')[1] || '1', 10)) % WEEKLY_BOSSES.length;
   const wb = WEEKLY_BOSSES[wbIdx];
