@@ -2024,8 +2024,6 @@ const DEFAULT_STATE = () => ({
   achClaimed: {},
   afterTale: {},
   tier: 0,
-  hall: null,
-  hallUnlocked: false,
   essence: 0,
   mats: {},
   artifacts: {},
@@ -2145,8 +2143,6 @@ function load() {
         s.mystery = Object.assign({ stock: [], next: 0 }, s.mystery || {});
         s.tier = s.tier || 0;
         s.essence = s.essence || 0;
-        s.hall = s.hall || null;
-        s.hallUnlocked = !!(s.hallUnlocked || (s.hall && s.hall.level));
         s.talentLv = s.talentLv || {};
         s.mats = s.mats || {};
         s.artifacts = s.artifacts || {};
@@ -5672,237 +5668,8 @@ function learnSect(id) {
   renderAll();
 }
 
-const HALL_SLOTS = [
-  { id: 'teach', name: '教习', desc: '教弟子，产声望' },
-  { id: 'garden', name: '药园', desc: '种灵草，产药材' },
-  { id: 'ledger', name: '账房', desc: '管账目，产银两' },
-  { id: 'steward', name: '管事', desc: '收徒与效率' },
-];
-
-const HALL_APT = {
-  wangyuyan: { teach: 0.6 },
-  huangrong: { ledger: 0.6 },
-  longnv: { garden: 0.6 },
-  zhaomin: { steward: 0.6 },
-  liqiushui: { teach: 0.4, ledger: 0.2 },
-  yingying: { ledger: 0.4 },
-  zhiruo: { teach: 0.4 },
-  susu: { steward: 0.4 },
-  axiu: { garden: 0.4 },
-  lucy: { steward: 0.4 },
-};
-
-function hallState() {
-  if (!S.hall) {
-    S.hall = { level: 1, last: Date.now(), herbs: 0, rep: 0, recruits: 0, slots: { teach: null, garden: null, ledger: null, steward: null } };
-  }
-  S.hall.slots = S.hall.slots || { teach: null, garden: null, ledger: null, steward: null };
-  if (!Array.isArray(S.hall.disciples)) S.hall.disciples = [];
-  return S.hall;
-}
-
-function hallApt(id, slot) {
-  if (!id) return 0;
-  const a = HALL_APT[id] || {};
-  return (a[slot] || 0) + 0.15;
-}
-
-function hallBonus(slot) {
-  const h = hallState();
-  return hallApt(h.slots[slot], slot);
-}
-
-function hallRates() {
-  const h = hallState();
-  const mult = 1 + 0.25 * (h.level - 1);
-  return {
-    silver: Math.round((80 + 160 * (1 + hallBonus('ledger'))) * mult),
-    herbs: Math.round((10 + 25 * (1 + hallBonus('garden'))) * mult),
-    rep: Math.round((2 + 4 * (1 + hallBonus('teach'))) * mult),
-  };
-}
-
-function hallAccrue(claim) {
-  const h = hallState();
-  const now = Date.now();
-  const hours = Math.min(12, Math.max(0, (now - (h.last || now)) / 3600000));
-  const r = hallRates();
-  const silver = Math.floor(r.silver * hours);
-  const herbs = Math.floor(r.herbs * hours);
-  const rep = Math.floor(r.rep * hours);
-  if (claim) {
-    h.last = now;
-    S.silver += silver;
-    h.herbs += herbs;
-    h.rep += rep;
-    addLog('武馆结算 ' + hours.toFixed(1) + ' 小时：银两 +' + silver + '，药材 +' + herbs + '，声望 +' + rep + '。', 'gold');
-    save();
-    renderAll();
-  }
-  return { hours, silver, herbs, rep };
-}
-
-function hallAssign(slot, id) {
-  const h = hallState();
-  if (id && !npcState(id).bond) return;
-  for (const k of Object.keys(h.slots)) {
-    if (h.slots[k] === id) h.slots[k] = null;
-  }
-  h.slots[slot] = id || null;
-  addLog(id ? '「' + npcName(id) + '」接手了' + HALL_SLOTS.find((s) => s.id === slot).name + '。' : '你撤下了' + HALL_SLOTS.find((s) => s.id === slot).name + '的人。', 'sys');
-  save();
-  renderAll();
-}
-
-function hallUpgrade() {
-  const h = hallState();
-  if (h.level >= 5) { addLog('武馆已是天下第一。', 'sys'); return; }
-  const cost = 5000 * h.level;
-  const needRep = 30 * h.level;
-  if (S.silver < cost) { addLog('银两不够（需 ' + cost + '）。', 'bad'); return; }
-  if (h.rep < needRep) { addLog('声望不够（需 ' + needRep + '）。', 'bad'); return; }
-  S.silver -= cost;
-  h.rep -= needRep;
-  h.level += 1;
-  addLog('武馆升级到 ' + h.level + ' 级，产出提升。', 'gold');
-  save();
-  renderAll();
-}
-
-const DISCIPLE_NAMES = ['张铁柱', '李小刀', '王二虎', '陈阿牛', '林小满', '赵石头', '周小乙', '孙铁牛', '吴小七', '郑小满', '冯小刀', '褚阿福'];
-
-function hallRecruit() {
-  const h = hallState();
-  if (h.herbs < 30) { addLog('药材不够（收徒需 30）。', 'bad'); return; }
-  h.disciples = h.disciples || [];
-  if (h.disciples.length >= 6) { addLog('武馆最多带 6 名弟子，先让他们出师。', 'bad'); return; }
-  h.herbs -= 30;
-  h.recruits += 1;
-  const name = pick(DISCIPLE_NAMES) + '·' + ['甲', '乙', '丙', '丁', '戊', '己'][h.disciples.length];
-  const apt = rndInt(3, 9);
-  h.disciples.push({ name, apt, exp: 0 });
-  const gain = Math.round(200 + 60 * h.level + hallBonus('steward') * 400);
-  S.silver += gain;
-  h.rep += 2;
-  addLog('你收下弟子「' + name + '」（资质 ' + apt + '），束脩 ' + gain + ' 两。', 'gold');
-  save();
-  renderAll();
-}
-
-function hallTrain(i) {
-  const h = hallState();
-  const d = (h.disciples || [])[i];
-  if (!d) return;
-  if (h.herbs < 10) { addLog('药材不够（培养需 10）。', 'bad'); return; }
-  h.herbs -= 10;
-  const gain = 15 + Math.round(hallBonus('teach') * 25) + d.apt * 2;
-  d.exp += gain;
-  addLog('「' + d.name + '」练了一趟功，进度 +' + gain + '（' + Math.min(100, d.exp) + '/100）。', 'sys');
-  save();
-  renderAll();
-}
-
-function hallGraduate(i) {
-  const h = hallState();
-  const d = (h.disciples || [])[i];
-  if (!d) return;
-  if (d.exp < 100) { addLog('还没到出师的火候。', 'sys'); return; }
-  h.disciples.splice(i, 1);
-  const silver = 500 + d.apt * 120;
-  const rep = 3 + Math.floor(d.apt / 3);
-  S.silver += silver;
-  h.rep += rep;
-  addLog('弟子「' + d.name + '」出师，摆酒三日。银两 +' + silver + '，声望 +' + rep + '。', 'gold');
-  save();
-  renderAll();
-}
-
-function hallTrial() {
-  const h = hallState();
-  const now = Date.now();
-  if (h.trialAt && now < h.trialAt) {
-    const m = Math.ceil((h.trialAt - now) / 60000);
-    addLog('刚踢完馆，歇口气（' + m + ' 分钟后再来）。', 'sys');
-    return;
-  }
-  const req = 2000 + h.level * 1500;
-  const pw = powerScore(totalStats());
-  const chance = clamp(0.5 + (pw - req) / Math.max(1, req) * 0.3, 0.15, 0.92);
-  h.trialAt = now + 2 * 3600 * 1000;
-  if (Math.random() < chance) {
-    const rep = 8 + h.level * 2;
-    const silver = 2000 * h.level;
-    h.rep += rep;
-    S.silver += silver;
-    h.trialWin = (h.trialWin || 0) + 1;
-    addLog('有人上门踢馆，被你当众打退。声望 +' + rep + '，银两 +' + silver + '。', 'gold');
-  } else {
-    h.rep = Math.max(0, h.rep - 5);
-    addLog('踢馆的人赢了半招，弟子们有些丧气。声望 -5。', 'bad');
-  }
-  save();
-  renderAll();
-}
-
-function hallAlchemy() {
-  const h = hallState();
-  if (h.herbs < 40) { addLog('药材不够（炼丹需 40）。', 'bad'); return; }
-  h.herbs -= 40;
-  const pool = ['jinchuang', 'dahuan', 'huiqi', 'xingqi', 'jiedu'];
-  const id = pick(pool);
-  const n = 2 + rndInt(0, 1);
-  S.potions[id] = (S.potions[id] || 0) + n;
-  const p = POTIONS.find((x) => x.id === id);
-  addLog('丹房开炉，炼出「' + p.name + '」×' + n + '（药材 -40）。', 'gold');
-  save();
-  renderAll();
-}
-
-function panelHall() {
-  if (S.ending !== 'retire' && !S.hallUnlocked) {
-    return '<h4>武馆</h4><div class="muted">归隐结局后，可在青石村开一间武馆，让故人替你打理。</div>';
-  }
-  const h = hallState();
-  const acc = hallAccrue(false);
-  const r = hallRates();
-  let html = '<h4>武馆（' + h.level + ' / 5 级）</h4>';
-  html += kv('已累积', acc.hours.toFixed(1) + ' 小时（最多 12）');
-  html += kv('待领取', acc.silver + ' 两 · ' + acc.herbs + ' 药材 · ' + acc.rep + ' 声望');
-  html += kv('每小时', r.silver + ' 两 · ' + r.herbs + ' 药材 · ' + r.rep + ' 声望');
-  html += '<div class="muted">药材：' + h.herbs + ' · 声望：' + h.rep + ' · 弟子：' + h.recruits + '</div>';
-  html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">' +
-    '<button class="primary" data-hall-claim="1">领取产出</button>' +
-    '<button data-hall-recruit="1">收徒（30 药材）</button>' +
-    '<button data-hall-alchemy="1">炼丹（40 药材）</button>' +
-    '<button data-hall-up="1">升级（' + (5000 * h.level) + ' 两 · ' + (30 * h.level) + ' 声望）</button></div>';
-  const bonded = NPCS.filter((n) => npcState(n.id).bond);
-  for (const slot of HALL_SLOTS) {
-    const cur = h.slots[slot.id];
-    html += '<div class="item"><div class="row"><span>' + slot.name +
-      ' <span class="tag">' + slot.desc + ' · 加成 ' + (hallBonus(slot.id) * 100).toFixed(0) + '%</span></span>' +
-      '<span><select data-hall-slot="' + slot.id + '" style="background:#0a0f0a;color:#cfe0cf;border:1px solid #2c3f2c;border-radius:4px;padding:2px 4px">' +
-      '<option value="">— 空 —</option>' +
-      bonded.map((n) => '<option value="' + n.id + '"' + (cur === n.id ? ' selected' : '') + '>' +
-        n.name + (HALL_APT[n.id] ? '（专长）' : '') + '</option>').join('') +
-      '</select></span></div></div>';
-  }
-  const dis = h.disciples || [];
-  html += '<h4>弟子（' + dis.length + ' / 6）</h4>';
-  html += dis.length
-    ? dis.map((d, i) => '<div class="item"><div class="row"><span>' + d.name +
-        ' <span class="tag">资质 ' + d.apt + ' · 进度 ' + Math.min(100, Math.floor(d.exp)) + '/100</span></span><span>' +
-        (d.exp >= 100
-          ? '<button data-hall-grad="' + i + '">出师</button>'
-          : '<button data-hall-train="' + i + '">培养（10 药材）</button>') +
-        '</span></div></div>').join('')
-    : '<div class="muted">还没有弟子，先收一个。</div>';
-  html += '<div style="margin:6px 0"><button data-hall-trial="1">迎战踢馆（2 小时一次）</button>' +
-    '<span class="muted"> 赢了涨声望与银两，输了掉 5 声望</span></div>';
-  return html;
-}
-
 function panelSects() {
-  let html = panelHall() + '<h3>门派</h3><div class="muted">拜山切磋：赢了涨声望和侠义，输了掉三成气血。声望 3 点后可花钱学本派心法。</div>';
+  let html = '<h3>门派</h3><div class="muted">拜山切磋：赢了涨声望和侠义，输了掉三成气血。声望 3 点后可花钱学本派心法。</div>';
   html += SECTS.map((s) => {
     const rep = S.sects[s.id] || 0;
     const locked = S.level < s.lv;
@@ -5973,12 +5740,11 @@ function panelSet() {
     '<div class="muted">江湖·挂机录 v1.4<br/>十图十级 · 秘境异界 · 门派 · 转生天赋 · 队友内院 · 宠物 · 称号 · 图鉴 · 悬赏<br/>图片导入：在「故人」面板里给角色换图，存在本机。</div>' +
     '<h4>更新日志</h4>' +
     '<div class="item"><div class="row"><span class="q-green">v1.4</span></div>' +
-    '<div class="aff">· 归隐结局解锁武馆：教习/药园/账房/管事四岗位，故人驻守产出银两、药材、声望（离线最多 12 小时）<br/>' +
-    '· 武馆收徒、培养学生、出师、踢馆事件与炼丹<br/>' +
-    '· 装备分解：分解得灵石，攒满 3000 必出红色装备<br/>' +
+    '<div class="aff">· 装备分解：分解得灵石，攒满 3000 必出红色装备<br/>' +
     '· 属性上限：爆伤 350%、吸血 15%、减伤 60% 等，天劫改为按真实输出定价<br/>' +
     '· 天赋「羁绊」与天赋升级（消耗轮回点，每级 +50%）<br/>' +
-    '· 修复爬塔低层过难、故人可同时驻守多个岗位的问题</div></div>' +
+    '· 首领成就改为累计计数，转生不清零<br/>' +
+    '· 修复爬塔低层过难、结局后无法继续挂机的问题</div></div>' +
     '<div class="item"><div class="row"><span class="q-green">v1.3</span></div>' +
     '<div class="aff">· 新增道途品阶（白→绿→蓝→青→紫→橙→红），名字变色，每阶攻防气血 +8%<br/>' +
     '· 新增天劫：满 100 级后可渡劫，失败连掉 3 级<br/>' +
@@ -6146,14 +5912,6 @@ function bindPanel() {
   el.querySelectorAll('[data-afterboss]').forEach((b) => b.addEventListener('click', () => startAfterBoss(b.dataset.afterboss)));
   el.querySelectorAll('[data-tianjie]').forEach((b) => b.addEventListener('click', startTianjie));
   el.querySelectorAll('[data-talent-up]').forEach((b) => b.addEventListener('click', () => upgradeTalent(b.dataset.talentUp)));
-  el.querySelectorAll('[data-hall-claim]').forEach((b) => b.addEventListener('click', () => hallAccrue(true)));
-  el.querySelectorAll('[data-hall-recruit]').forEach((b) => b.addEventListener('click', hallRecruit));
-  el.querySelectorAll('[data-hall-up]').forEach((b) => b.addEventListener('click', hallUpgrade));
-  el.querySelectorAll('[data-hall-slot]').forEach((sel) => sel.addEventListener('change', () => hallAssign(sel.dataset.hallSlot, sel.value)));
-  el.querySelectorAll('[data-hall-train]').forEach((b) => b.addEventListener('click', () => hallTrain(+b.dataset.hallTrain)));
-  el.querySelectorAll('[data-hall-grad]').forEach((b) => b.addEventListener('click', () => hallGraduate(+b.dataset.hallGrad)));
-  el.querySelectorAll('[data-hall-trial]').forEach((b) => b.addEventListener('click', hallTrial));
-  el.querySelectorAll('[data-hall-alchemy]').forEach((b) => b.addEventListener('click', hallAlchemy));
   el.querySelectorAll('[data-art-craft]').forEach((b) => b.addEventListener('click', () => craftArtifact(b.dataset.artCraft)));
   el.querySelectorAll('[data-art-equip]').forEach((b) => b.addEventListener('click', () => equipArtifact(b.dataset.artEquip)));
   el.querySelectorAll('[data-art-unequip]').forEach((b) => b.addEventListener('click', () => unequipArtifact(b.dataset.artUnequip)));
@@ -6507,7 +6265,6 @@ function showEndingChoice() {
 
 function finishGame(kind) {
   S.ending = kind;
-  if (kind === 'retire') S.hallUnlocked = true;
   const h = S.honor || 0;
   const good = h >= 40;
   const evil = h <= -40;
