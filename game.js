@@ -546,7 +546,7 @@ const HEROES = [
 const TITLES = [
   { id: 'firstblood', name: '初出茅庐', desc: '第一次杀人', mods: { atkPct: 0.01 }, cond: () => S.stats.kills >= 1 },
   { id: 'hunter', name: '百人斩', desc: '击杀 100', mods: { atkPct: 0.02 }, cond: () => S.stats.kills >= 100 },
-  { id: 'tiger', name: '伏虎', desc: '击败 10 个首领', mods: { atkPct: 0.03 }, cond: () => S.bossCount >= 10 },
+  { id: 'tiger', name: '伏虎', desc: '累计击败 10 个首领', mods: { atkPct: 0.03 }, cond: () => (S.stats.boss || 0) >= 10 },
   { id: 'hero', name: '侠名远播', desc: '侠义 ≥60', mods: { hpPct: 0.05 }, cond: () => (S.honor || 0) >= 60 },
   { id: 'villain', name: '恶名昭彰', desc: '恶名 ≤-60', mods: { atkPct: 0.05, hpPct: -0.03 }, cond: () => (S.honor || 0) <= -60 },
   { id: 'reborn', name: '轮回者', desc: '转生一次', mods: { expPct: 0.05 }, cond: () => (S.rebirth || 0) >= 1 },
@@ -2132,6 +2132,7 @@ function load() {
           if (it && it.legendId) { s.codex.legend[it.legendId] = true; s.equip[k] = null; }
         }
         s.stats = Object.assign({ kills: 0, deaths: 0, dungeon: 0, challWin: 0 }, s.stats || {});
+        s.stats.boss = Math.max(s.stats.boss || 0, s.bossCount || 0);
         if (s.ending && (s.level || 1) < MAX_LEVEL) s.ending = null;
         s.ver = SAVE_VER;
         s.xuanjing = s.xuanjing || 0;
@@ -3435,6 +3436,8 @@ function onMonsterKilled() {
 
   if (m.isBoss && !m.isChallenger && !m.isWeekly && !m.isAfterBoss && !m.isTianjie) {
     S.bossCount += 1;
+    S.stats = S.stats || {};
+    S.stats.boss = (S.stats.boss || 0) + 1;
     bountyAdd('boss', 1);
     S.cleared[S.mapIndex] = true;
     S.tokens = Math.min(5, (S.tokens || 0) + 1);
@@ -3929,8 +3932,8 @@ const ACHIEVEMENTS = [
   { id: 'k100', name: '小有名气', desc: '击杀 100 个敌人', cond: () => S.stats.kills >= 100, silver: 2000, xj: 2 },
   { id: 'k1000', name: '杀人如麻', desc: '击杀 1000 个敌人', cond: () => S.stats.kills >= 1000, silver: 8000, xj: 5 },
   { id: 'k10000', name: '血流成河', desc: '击杀 10000 个敌人', cond: () => S.stats.kills >= 10000, silver: 30000, xj: 15 },
-  { id: 'boss10', name: '屠首十人', desc: '击败 10 个首领', cond: () => (S.bossCount || 0) >= 10, silver: 3000, xj: 3 },
-  { id: 'boss100', name: '百首之威', desc: '击败 100 个首领', cond: () => (S.bossCount || 0) >= 100, silver: 15000, xj: 10 },
+  { id: 'boss10', name: '屠首十人', desc: '累计击败 10 个首领', cond: () => (S.stats.boss || 0) >= 10, silver: 3000, xj: 3 },
+  { id: 'boss100', name: '百首之威', desc: '累计击败 100 个首领', cond: () => (S.stats.boss || 0) >= 100, silver: 15000, xj: 10 },
   { id: 'd10', name: '秘境常客', desc: '通关秘境 10 次', cond: () => (S.stats.dungeon || 0) >= 10, silver: 4000, xj: 3 },
   { id: 'd50', name: '秘境之主', desc: '通关秘境 50 次', cond: () => (S.stats.dungeon || 0) >= 50, silver: 20000, xj: 10 },
   { id: 't10', name: '登塔十层', desc: '爬塔最高 10 层', cond: () => (S.towerBest || 0) >= 10, silver: 5000, xj: 4 },
