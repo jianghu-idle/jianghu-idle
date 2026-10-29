@@ -2063,6 +2063,15 @@ function load() {
           learned: Object.assign({ passives: [], actives: [] }, data.learned || {}),
         });
         // 旧档兼容
+        // 立绘已换成 320px WebP：老的 portraits/xxx.png 路径改指 .webp（自定义图是 data URL，不受影响）
+        if (s.npcImg) {
+          for (const id of Object.keys(s.npcImg)) {
+            const v = s.npcImg[id];
+            if (typeof v === 'string' && /^portraits\/[^/]+\.png$/.test(v)) {
+              s.npcImg[id] = v.replace(/\.png$/, '.webp');
+            }
+          }
+        }
         s.potions = s.potions || {};
         s.buffs = s.buffs || [];
         s.shop = Object.assign({ stock: [], next: 0 }, s.shop || {});
@@ -2164,13 +2173,40 @@ function load() {
   return DEFAULT_STATE();
 }
 
+let saveFailWarned = false;
+
 function save() {
   S.savedAt = Date.now();
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(S));
   } catch (e) {
-    /* 图片过多可能超限，静默失败 */
+    /* 容量超限：只提示一次，别每 tick 刷屏 */
+    if (!saveFailWarned) {
+      saveFailWarned = true;
+      const el = document.getElementById('battle-status');
+      if (el) {
+        el.textContent = '存档失败：本地空间不足（多半是导入的图片太大），请清理浏览器数据';
+        el.style.color = '#d06a6a';
+      }
+    }
   }
+}
+
+/* 存档防抖：战斗中每 tick 都全量 stringify 太贵，攒 4 秒写一次 */
+let saveTimer = 0;
+let saveDirty = false;
+function markSave() {
+  saveDirty = true;
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = 0;
+    if (saveDirty) { saveDirty = false; save(); }
+  }, 4000);
+}
+function flushSave() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = 0; }
+  saveDirty = false;
+  save();
 }
 
 /* ------------------------------------------------------------ 属性 */
@@ -3337,7 +3373,7 @@ function tick() {
   renderHud();
   renderStatus();
   renderPartyStatus();
-  save();
+  markSave();
 }
 
 function onMonsterKilled() {
@@ -4650,17 +4686,30 @@ function giftNpc(id) {
 
 /* ------------------------------------------------------------ 日志/渲染 */
 
+const BRIEF_CLASSES = ['story', 'gold', 'boss', 'righteous', 'evil', 'bad'];
+
 function addLog(text, cls) {
-  logLines.push({ text, cls: cls || '' });
+  const c = cls || '';
+  logLines.push({ text, cls: c });
   if (logLines.length > 220) logLines.shift();
-  renderLog();
+  const el = document.getElementById('log');
+  if (!el) return;
+  if (logMode === 'brief' && BRIEF_CLASSES.indexOf(c) < 0) return;
+  // 用户在往上翻历史时不要强行拽回底部
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+  const d = document.createElement('div');
+  d.className = 'line ' + c;
+  d.textContent = text;
+  el.appendChild(d);
+  while (el.childElementCount > 220) el.removeChild(el.firstChild);
+  if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
+/* 只在切换「全部/精简」时全量重建 */
 function renderLog() {
   const el = document.getElementById('log');
   if (!el) return;
-  const brief = ['story', 'gold', 'boss', 'righteous', 'evil', 'bad'];
-  const list = logMode === 'brief' ? logLines.filter((l) => brief.includes(l.cls)) : logLines;
+  const list = logMode === 'brief' ? logLines.filter((l) => BRIEF_CLASSES.includes(l.cls)) : logLines;
   el.innerHTML = list.map((l) => '<div class="line ' + l.cls + '">' + escapeHtml(l.text) + '</div>').join('');
   el.scrollTop = el.scrollHeight;
 }
@@ -6170,17 +6219,52 @@ function npcAvatar(id) {
 
 function autoLoadPortraits() {
   if (typeof Image === 'undefined') return;
+  let loaded = 0;
+  let settleTimer = 0;
+  // 全部探测完（或 250ms 没有新图）再统一写盘 + 重绘一次，别 18 张各来一遍
+  const settle = () => {
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      settleTimer = 0;
+      if (!loaded) return;
+      markSave();
+      try { renderPanel(); } catch (e) { /* 面板还没就绪 */ }
+    }, 250);
+  };
   NPCS.forEach((npc) => {
     if (S.npcImg[npc.id]) return;
-    const probe = new Image();
-    const src = 'portraits/' + npc.id + '.png';
-    probe.onload = () => {
-      S.npcImg[npc.id] = src;
-      save();
-      renderPanel();
+    const base = 'portraits/' + npc.id;
+    const img = new Image();
+    img.onload = () => { S.npcImg[npc.id] = base + '.webp'; loaded += 1; settle(); };
+    img.onerror = () => {
+      const p = new Image();
+      p.onload = () => { S.npcImg[npc.id] = base + '.png'; loaded += 1; settle(); };
+      p.src = base + '.png';
     };
-    probe.src = src;
+    img.src = base + '.webp';
   });
+}
+
+/* 导入头像：先缩到 320px 再转 WebP，避免 base64 把 localStorage 撑爆 */
+function readCompressedImage(file, cb) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 320 / Math.max(img.width || 1, img.height || 1));
+      const w = Math.max(1, Math.round((img.width || 320) * scale));
+      const h = Math.max(1, Math.round((img.height || 320) * scale));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      let out;
+      try { out = c.toDataURL('image/webp', 0.82); } catch (e) { out = c.toDataURL('image/jpeg', 0.82); }
+      cb(out);
+    };
+    img.onerror = () => cb(fr.result);
+    img.src = fr.result;
+  };
+  fr.readAsDataURL(file);
 }
 
 function batchImportNpcImages() {
@@ -6196,13 +6280,11 @@ function batchImportNpcImages() {
       const npc = NPCS.find((x) => x.id === base || x.name === base || base.indexOf(x.name) >= 0);
       if (!npc) return;
       n += 1;
-      const r = new FileReader();
-      r.onload = () => {
-        S.npcImg[npc.id] = r.result;
-        save();
+      readCompressedImage(f, (dataUrl) => {
+        S.npcImg[npc.id] = dataUrl;
+        markSave();
         openNpcList();
-      };
-      r.readAsDataURL(f);
+      });
     });
     addLog('批量导入 ' + n + ' 张（按文件名匹配）。', 'sys');
   };
@@ -6216,7 +6298,7 @@ function openNpcList() {
     const ok = npcAvailable(n);
     const img = S.npcImg[n.id];
     return '<div class="npc-card">' +
-      '<div class="npc-pic"><img src="' + npcAvatar(n.id) + '" /></div>' +      '<div class="npc-main">' +
+      '<div class="npc-pic"><img src="' + npcAvatar(n.id) + '" loading="lazy" decoding="async" alt="' + n.name + '" /></div>' +      '<div class="npc-main">' +
       '<div><span class="npc-name">' + n.name + '</span><span class="tag">' + n.title + '</span>' +
       '<span class="tag">' + ({ good: '正道', evil: '邪道', neutral: '中立' }[n.faction] || '中立') + '</span></div>' +
       '<div class="muted">' + MAPS[n.mapIndex].name + ' · ' + stage.name + ' · 好感 ' + st.fav + ' · 闲聊 ' + chatsToday(n.id) + '/3</div>' +
@@ -6236,31 +6318,42 @@ function openNpcList() {
     const id = inp.dataset.img;
     const f = inp.files && inp.files[0];
     if (!f) return;
-    if (f.size > 900 * 1024) { addLog('图片太大（>900KB），换一张小点的。', 'bad'); return; }
-    const r = new FileReader();
-    r.onload = () => {
-      S.npcImg[id] = r.result;
-      save();
+    if (f.size > 12 * 1024 * 1024) { addLog('图片太大（>12MB），换一张。', 'bad'); return; }
+    // 统一缩到 320px WebP，存档里只占二十来 KB
+    readCompressedImage(f, (dataUrl) => {
+      S.npcImg[id] = dataUrl;
+      markSave();
       openNpcList();
-    };
-    r.readAsDataURL(f);
+    });
   }));
 }
 
 /* ------------------------------------------------------------ 结局 */
 
+function endingByHonor() {
+  const h = S.honor || 0;
+  if (h >= 40) return 'save';
+  if (h <= -40) return 'overthrow';
+  return 'retire';
+}
+
 function showEndingChoice() {
+  const kind = endingByHonor();
+  const h = S.honor || 0;
+  const label = kind === 'save' ? '清君侧 · 侠名' : kind === 'overthrow' ? '坐龙椅 · 野心' : '归隐 · 不问';
+  const why = kind === 'save'
+    ? '你这一路救人无数，侠义 ' + h + '。天下人都在等你扶社稷。'
+    : kind === 'overthrow'
+      ? '你这一路杀伐决断，侠义 ' + h + '。龙椅空着，你的手已经按在剑上。'
+      : '你不算好人，也不算恶人，侠义 ' + h + '。你只想把这把刀埋了。';
   showModal([
-    '<h2>金銮殿 · 最后一问</h2>',
-    '<p class="story-text">国师已死，权臣伏诛。龙椅空着，天下等你一句话。</p>',
-    '<div class="modal-actions">',
-    '<button class="choice" data-end="overthrow">颠覆王朝——你坐上龙椅，改朝换代</button>',
-    '<button class="choice" data-end="save">拯救王朝——清君侧，功成身退</button>',
-    '<button class="choice" data-end="retire">归隐江湖——把刀埋了，从此不问</button>',
-    '</div>',
+    '<h2>金銮殿 · 天命已定</h2>',
+    '<p class="story-text">' + why + '</p>',
+    '<p class="muted">结局由侠义自动决定，本次为「' + label + '」。</p>',
+    '<div class="modal-actions"><button class="choice" data-end="1">领受</button></div>',
   ].join(''));
   const m = document.getElementById('modal-body');
-  m.querySelectorAll('[data-end]').forEach((b) => b.addEventListener('click', () => finishGame(b.dataset.end)));
+  m.querySelectorAll('[data-end]').forEach((b) => b.addEventListener('click', () => finishGame(kind)));
 }
 
 function finishGame(kind) {
@@ -6379,7 +6472,7 @@ function bindUI() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       hiddenAt = Date.now();
-      save();
+      flushSave();
       return;
     }
     if (!hiddenAt) return;
@@ -6390,6 +6483,11 @@ function bindUI() {
       renderAll();
     }
   });
+  // 关页/刷新时兜底存一次，防抖里的待写数据不丢
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('pagehide', flushSave);
+    window.addEventListener('beforeunload', flushSave);
+  }
 }
 
 function showOfflineModal(dur, exp, silver, eq, eqSold) {
